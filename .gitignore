@@ -1,0 +1,92 @@
+# =========================
+# Node modules
+# =========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# =========================
+# Build output
+# =========================
+dist/
+build/
+.vite/
+
+# =========================
+# Environment variables
+# =========================
+.env
+.env.*
+!.env.example
+
+# =========================
+# Logs
+# =========================
+logs/
+*.log
+
+# =========================
+# OS / Editor
+# =========================
+.DS_Store
+Thumbs.db
+
+.vscode/
+.idea/
+
+# =========================
+# TypeScript
+# =========================
+*.tsbuildinfo
+
+# =========================
+# Cache
+# =========================
+.cache/
+.temp/
+.tmp/
+
+# =========================
+# Test / coverage
+# =========================
+coverage/
+
+# =========================
+# Assets lớn (QUAN TRỌNG)
+# =========================
+
+# Raw models (nặng, không cần push)
+public/models/raw/
+
+# Nếu file .glb lớn > 50MB thì KHÔNG nên push
+# (chỉ giữ file demo nhỏ)
+*.glb
+!public/models/glasses-001.glb
+!public/models/glasses-002.glb
+
+# textures nếu quá nặng
+public/textures/*.psd
+public/textures/*.blend
+
+# thumbnails auto generate
+public/thumbnails/generated/
+
+# =========================
+# Scripts output
+# =========================
+scripts/output/
+
+# =========================
+# Debug files
+# =========================
+*.local
+*.debug
+
+# =========================
+# Misc
+# =========================
+*.zip
+*.tar
+*.gz
