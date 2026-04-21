@@ -1,73 +1,48 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { FaceMesh, Results } from '@mediapipe/face_mesh';
-import { Camera } from '@mediapipe/camera_utils';
-import { FaceLandmarks } from '@/types/landmarks';
-import { extractLandmarks } from '@/lib/faceMeshProcessor';
+import { useEffect, useRef, useState } from 'react';
+import * as faceMeshModule from '@mediapipe/face_mesh';
 
-export function useFaceMesh(videoRef: React.RefObject<HTMLVideoElement>) {
-  const [landmarks, setLandmarks] = useState<FaceLandmarks | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const faceMeshRef = useRef<FaceMesh | null>(null);
-  const cameraRef = useRef<Camera | null>(null);
+// Workaround (Mẹo) xử lý lỗi import thư viện MediaPipe trong môi trường Vite
+const FaceMeshClass = faceMeshModule.FaceMesh || (faceMeshModule as any).default?.FaceMesh || (window as any).FaceMesh;
 
-  const onResults = useCallback((results: Results) => {
-    if (!videoRef.current) return;
+export function useFaceMesh() {
+  const faceMeshRef = useRef<any>(null); 
+  const [isReady, setIsReady] = useState(false);
 
-    const videoWidth = videoRef.current.videoWidth;
-    const videoHeight = videoRef.current.videoHeight;
-
-    if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-      const faceLandmarks = extractLandmarks(
-        results.multiFaceLandmarks[0],
-        videoWidth,
-        videoHeight
-      );
-      setLandmarks(faceLandmarks);
-    } else {
-      setLandmarks(null);
+  useEffect(() => {
+    // Tránh crash nếu module thực sự không load được
+    if (!FaceMeshClass) {
+      console.error("Không thể load được module FaceMesh từ MediaPipe.");
+      return;
     }
-  }, [videoRef]);
 
-  const initialize = useCallback(async () => {
-    const faceMesh = new FaceMesh({
-      locateFile: (file) =>
+    // Khởi tạo FaceMesh với CDN jsdelivr
+    const faceMesh = new FaceMeshClass({
+      locateFile: (file: string) =>
         `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
     });
 
+    // Cấu hình: 1 khuôn mặt, 478 điểm (refineLandmarks), độ tự tin 0.7
     faceMesh.setOptions({
       maxNumFaces: 1,
-      refineLandmarks: true,
-      minDetectionConfidence: 0.5,
-      minTrackingConfidence: 0.5,
+      refineLandmarks: true, 
+      minDetectionConfidence: 0.7,
+      minTrackingConfidence: 0.7,
     });
 
-    faceMesh.onResults(onResults);
+    // Khi load xong model sẽ chạy callback này báo hiệu AI đã sẵn sàng
+    faceMesh.onResults(() => {
+      if (!isReady) setIsReady(true);
+    });
+
     faceMeshRef.current = faceMesh;
 
-    if (videoRef.current) {
-      const camera = new Camera(videoRef.current, {
-        onFrame: async () => {
-          if (faceMeshRef.current && videoRef.current) {
-            await faceMeshRef.current.send({ image: videoRef.current });
-          }
-        },
-        width: 1280,
-        height: 720,
-      });
-
-      cameraRef.current = camera;
-      await camera.start();
-    }
-
-    setIsLoading(false);
-  }, [onResults, videoRef]);
-
-  useEffect(() => {
+    // Cleanup khi component unmount
     return () => {
-      cameraRef.current?.stop();
-      faceMeshRef.current?.close();
+      if (faceMeshRef.current) {
+        faceMeshRef.current.close();
+      }
     };
   }, []);
 
-  return { landmarks, isLoading, initialize };
+  return { faceMeshRef, isReady };
 }

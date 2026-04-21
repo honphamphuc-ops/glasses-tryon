@@ -1,11 +1,43 @@
+import { create } from 'zustand';
+import { GlassesModel } from '@/types/glasses';
+
+type WebcamStatus = 'idle' | 'starting' | 'active' | 'error';
+
 export interface AppStoreState {
+  // --- States ---
+  webcamStatus: WebcamStatus;
+  selectedGlasses: GlassesModel | null;
+  isLoading: boolean;
+  error: string | null;
   calibratedEyeWidth: number | null;
+  loadingModelId: string | null; 
+
+  // --- Actions ---
+  selectGlasses: (glasses: GlassesModel | null) => void;
+  setWebcamStatus: (status: WebcamStatus, error?: string | null) => void;
+  calibrate: (eyeWidth: number) => void;
+  setIsLoading: (isLoading: boolean) => void;
+  setLoadingModelId: (id: string | null) => void;
+  resetCalibration: () => void;
 }
 
-const initialState: AppStoreState = {
+export const useAppStore = create<AppStoreState>((set) => ({
+  // Giá trị mặc định
+  webcamStatus: 'idle',
+  selectedGlasses: null,
+  isLoading: false,
+  error: null,
   calibratedEyeWidth: null,
-};
+  loadingModelId: null,
 
-export function useAppStore(): AppStoreState {
-  return initialState;
-}
+  // Các hàm thay đổi state
+  selectGlasses: (glasses) => set({ selectedGlasses: glasses }),
+  
+  setWebcamStatus: (status, error = null) => set({ webcamStatus: status, error }),
+  
+  calibrate: (eyeWidth) => set({ calibratedEyeWidth: eyeWidth }),
+  
+  setIsLoading: (isLoading) => set({ isLoading }),
+  setLoadingModelId: (id) => set({ loadingModelId: id }),
+  resetCalibration: () => set({ calibratedEyeWidth: null }), // Hủy kết quả đo cũ
+}));

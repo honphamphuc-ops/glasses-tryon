@@ -1,51 +1,65 @@
-import { mat4 } from 'gl-matrix';
-import { FaceLandmarks } from '@/types/landmarks';
+import * as THREE from 'three';
+import { GlassesTransform } from '@/types/landmarks';
 
-export interface HeadPose {
-  rotation: { x: number; y: number; z: number };
-  position: { x: number; y: number; z: number };
-  scale: number;
+const REFERENCE_EYE_WIDTH = 0.28;
+
+export function ndcToWorld(
+  nx: number,
+  ny: number,
+  depth: number,
+  camera: THREE.PerspectiveCamera,
+  canvasWidth: number,
+  canvasHeight: number
+): THREE.Vector3 {
+  const target = new THREE.Vector3();
+  const vFOV = THREE.MathUtils.degToRad(camera.fov);
+  const heightAtDepth = 2 * Math.tan(vFOV / 2) * Math.abs(depth);
+  const widthAtDepth = heightAtDepth * (canvasWidth / canvasHeight);
+
+  target.x = -(nx - 0.5) * widthAtDepth;
+  target.y = -(ny - 0.5) * heightAtDepth;
+  target.z = depth;
+
+  return target;
 }
 
-export function estimateHeadPose(landmarks: FaceLandmarks): HeadPose {
-  const { leftEye, rightEye, noseBridge } = landmarks;
-
-  // Calculate center between eyes
-  const centerX = (leftEye.x + rightEye.x) / 2;
-  const centerY = (leftEye.y + rightEye.y) / 2;
-  const centerZ = (leftEye.z + rightEye.z) / 2;
-
-  // Estimate yaw (rotation around Y axis)
-  const dx = rightEye.x - leftEye.x;
-  const dz = rightEye.z - leftEye.z;
-  const yaw = Math.atan2(dz, dx);
-
-  // Estimate pitch (rotation around X axis)
-  const eyeMidY = (leftEye.y + rightEye.y) / 2;
-  const noseY = noseBridge.y;
-  const noseZ = noseBridge.z;
-  const pitch = Math.atan2(noseY - eyeMidY, Math.abs(noseZ - centerZ) + 1);
-
-  // Estimate roll (rotation around Z axis)
-  const roll = Math.atan2(rightEye.y - leftEye.y, rightEye.x - leftEye.x);
-
-  // Scale based on face width
-  const scale = landmarks.faceWidth;
-
-  return {
-    rotation: { x: pitch, y: yaw, z: roll },
-    position: { x: centerX, y: centerY, z: centerZ },
-    scale,
-  };
+export function computeWorldScale(
+  currentEyeWidth: number,
+  calibratedEyeWidth: number | null,
+  depth: number,
+  camera: THREE.PerspectiveCamera
+): number {
+  const reference = calibratedEyeWidth ?? REFERENCE_EYE_WIDTH;
+  const screenScale = currentEyeWidth / reference;
+  const vFOV = THREE.MathUtils.degToRad(camera.fov);
+  const perspectiveFactor = 2 * Math.tan(vFOV / 2) * Math.abs(depth);
+  
+  return screenScale * perspectiveFactor * 0.45;
 }
 
-export function createTransformMatrix(pose: HeadPose): mat4 {
-  const matrix = mat4.create();
+export function applyTransformToModel(
+  model: THREE.Object3D,
+  transform: GlassesTransform,
+  camera: THREE.PerspectiveCamera,
+  canvasWidth: number,
+  canvasHeight: number,
+  _calibratedEyeWidth?: number | null // Đã thêm dấu gạch dưới để TS bỏ qua cảnh báo unused
+): void {
+  const worldPos = ndcToWorld(
+    transform.position.x,
+    transform.position.y,
+    -0.65,
+    camera,
+    canvasWidth,
+    canvasHeight
+  );
+  
+  model.position.lerp(worldPos, 0.25);
 
-  mat4.translate(matrix, matrix, [pose.position.x, pose.position.y, pose.position.z]);
-  mat4.rotateX(matrix, matrix, pose.rotation.x);
-  mat4.rotateY(matrix, matrix, pose.rotation.y);
-  mat4.rotateZ(matrix, matrix, pose.rotation.z);
+  const targetQuat = new THREE.Quaternion().setFromEuler(
+    new THREE.Euler(transform.rotation.x, transform.rotation.y, transform.rotation.z, 'XYZ')
+  );
+  model.quaternion.slerp(targetQuat, 0.2);
 
-  return matrix;
+  model.scale.setScalar(transform.scale);
 }

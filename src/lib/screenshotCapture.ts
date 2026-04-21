@@ -1,28 +1,44 @@
-export function captureScreenshot(
-  videoElement: HTMLVideoElement,
-  overlayCanvas: HTMLCanvasElement
-): string {
-  const canvas = document.createElement('canvas');
-  const ctx = canvas.getContext('2d');
-  if (!ctx) throw new Error('Could not get canvas context');
+/**
+ * Xử lý chụp ảnh kết hợp Video và Canvas 3D
+ */
+export async function captureSnapshot(
+  videoEl: HTMLVideoElement,
+  outputCanvas: HTMLCanvasElement,
+  glassesName: string
+): Promise<string> {
+  const width = videoEl.videoWidth;
+  const height = videoEl.videoHeight;
 
-  canvas.width = videoElement.videoWidth;
-  canvas.height = videoElement.videoHeight;
+  // 1. Tạo Canvas ẩn (Offscreen)
+  const captureCanvas = document.createElement('canvas');
+  captureCanvas.width = width;
+  captureCanvas.height = height;
+  const ctx = captureCanvas.getContext('2d');
 
-  // Draw video frame
-  ctx.drawImage(videoElement, 0, 0, canvas.width, canvas.height);
+  if (!ctx) throw new Error('Không thể khởi tạo context 2D');
 
-  // Draw glasses overlay
-  ctx.drawImage(overlayCanvas, 0, 0, canvas.width, canvas.height);
+  // Lớp 1: Vẽ Video Camera
+  // Vì video trên giao diện thường bị lật gương (scaleX(-1)), 
+  // ta phải lật lại canvas này trước khi vẽ để ảnh chụp giống hệt những gì user thấy.
+  ctx.save();
+  ctx.scale(-1, 1);
+  ctx.translate(-width, 0);
+  ctx.drawImage(videoEl, 0, 0, width, height);
+  ctx.restore();
 
-  return canvas.toDataURL('image/png');
-}
+  // Lớp 2: Vẽ Three.js Canvas (Kính 3D)
+  // Lưu ý: outputCanvas phải được khởi tạo với preserveDrawingBuffer: true
+  ctx.drawImage(outputCanvas, 0, 0, width, height);
 
-export function downloadScreenshot(dataUrl: string, filename = 'glasses-tryon.png') {
+  // 2. Xuất dữ liệu ảnh
+  const dataUrl = captureCanvas.toDataURL('image/png');
+
+  // 3. Tự động tải xuống
   const link = document.createElement('a');
+  const timestamp = new Date().getTime();
+  link.download = `tryon-${glassesName.toLowerCase().replace(/\s+/g, '-')}-${timestamp}.png`;
   link.href = dataUrl;
-  link.download = filename;
-  document.body.appendChild(link);
   link.click();
-  document.body.removeChild(link);
+
+  return dataUrl;
 }

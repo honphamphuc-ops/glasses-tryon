@@ -26,10 +26,30 @@ export function useWebcam() {
       setIsActive(true);
       setHasPermission(true);
       setError(null);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : 'Camera access denied';
-      setError(message);
+    } catch (err: unknown) {
       setHasPermission(false);
+      
+      // Phân loại 3 loại lỗi camera phổ biến
+      if (err instanceof DOMException) {
+        switch (err.name) {
+          case 'NotAllowedError':
+          case 'SecurityError':
+            setError('Quyền truy cập bị từ chối. Vui lòng cấp quyền sử dụng camera trên trình duyệt.');
+            break;
+          case 'NotFoundError':
+          case 'OverconstrainedError':
+            setError('Không tìm thấy camera trên thiết bị của bạn. Vui lòng kiểm tra lại kết nối.');
+            break;
+          case 'NotReadableError':
+          case 'TrackStartError':
+            setError('Camera đang được sử dụng bởi một ứng dụng khác (như Zoom, Meet) hoặc bị lỗi phần cứng.');
+            break;
+          default:
+            setError('Lỗi không xác định khi truy cập camera: ' + err.message);
+        }
+      } else {
+        setError('Lỗi không xác định khi truy cập camera.');
+      }
     }
   }, []);
 
