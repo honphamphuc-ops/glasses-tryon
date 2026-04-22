@@ -16,7 +16,8 @@ export function ndcToWorld(
   const heightAtDepth = 2 * Math.tan(vFOV / 2) * Math.abs(depth);
   const widthAtDepth = heightAtDepth * (canvasWidth / canvasHeight);
 
-  target.x = -(nx - 0.5) * widthAtDepth;
+  // target.x = -(nx - 0.5) * widthAtDepth;
+  target.x = (nx - 0.5) * widthAtDepth;
   target.y = -(ny - 0.5) * heightAtDepth;
   target.z = depth;
 
@@ -45,9 +46,19 @@ export function applyTransformToModel(
   canvasHeight: number,
   _calibratedEyeWidth?: number | null // Đã thêm dấu gạch dưới để TS bỏ qua cảnh báo unused
 ): void {
+  // const worldPos = ndcToWorld(
+  //   transform.position.x,
+  //   transform.position.y,
+  //   -0.65,
+  //   camera,
+  //   canvasWidth,
+  //   canvasHeight
+  const nx = transform.position.x / canvasWidth;
+  const ny = transform.position.y / canvasHeight;
+
   const worldPos = ndcToWorld(
-    transform.position.x,
-    transform.position.y,
+    nx,
+    ny,
     -0.65,
     camera,
     canvasWidth,

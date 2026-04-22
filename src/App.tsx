@@ -15,24 +15,31 @@ import { CaptureButton } from '@/components/CaptureButton';
 import { PermissionModal } from '@/components/PermissionModal';
 import { CalibrationOverlay } from '@/components/CalibrationOverlay';
 import { FpsCounter } from '@/components/FpsCounter';
-import { PreviewModal } from '@/components/PreviewModal'; 
+import { PreviewModal } from '@/components/PreviewModal';
 
 // --- Store & Utils ---
 import { useAppStore } from '@/store/useAppStore';
 import { glassesCatalog } from '@/data/catalog';
-import { extractLandmarks } from '@/lib/faceMeshProcessor';
+import { 
+  extractLandmarks, 
+  drawDebugLandmarks, 
+  extractEyeMetrics 
+} from '@/lib/faceMeshProcessor';
 import { computeGlassesTransform } from '@/lib/glassesMapper';
-import { drawDebugLandmarks } from '@/lib/faceMeshProcessor';
 import { drawEyeBoundingBox, drawNosePoint } from '@/lib/debugRenderer';
 import { captureSnapshot } from '@/lib/screenshotCapture';
 import { GlassesModel } from '@/types/glasses';
 
 export default function App() {
+  // 1. Refs để quản lý dữ liệu không cần re-render
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const latestTransformRef = useRef<any>(null); // Lưu tọa độ kính để luồng Render lấy liên tục
+
+  // 2. Local State
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
 
-  // 1. Quản lý trạng thái tập trung từ Zustand Store
+  // 3. Zustand Store
   const { 
     selectedGlasses, 
     selectGlasses, 
@@ -44,65 +51,78 @@ export default function App() {
     setWebcamStatus
   } = useAppStore();
 
-  // 2. Khởi tạo các dịch vụ Camera, AI FaceMesh và Performance Stats
+  // 4. Khởi tạo các dịch vụ AI và Camera
   const { videoRef, isActive, error: camError, hasPermission, startCamera } = useWebcam();
   const { faceMeshRef, isReady: isAiReady } = useFaceMesh();
   const { stats, markFrame, markTrackStart, markTrackEnd } = useRenderStats();
   const { processSample, isCalibrated, progress } = useCalibration();
   
-  // 3. Khởi tạo Renderer 3D (Three.js)
-  const { renderFrame } = useGlassesRenderer(
-    canvasRef,
-    1280,
-    720
-  );
+  // 5. Khởi tạo Renderer 3D
+  const { renderFrame } = useGlassesRenderer(canvasRef, 1280, 720);
 
-  // 4. Callback xử lý kết quả AI (Tracking Loop - 30fps)
+  /**
+   * 6. LUỒNG XỬ LÝ AI (Tracking - 30fps)
+   * Nhận landmarks -> Tính transform -> Cập nhật Ref
+   */
   const handleResults = useCallback((results: any) => {
-    // Ghi nhận hiệu năng tracking
     markTrackEnd(results.multiFaceLandmarks?.length > 0);
 
     if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
       const rawPoints = results.multiFaceLandmarks[0];
+      // Chuyển đổi landmark sang đơn vị Pixel
       const landmarks = extractLandmarks(rawPoints, 1280, 720);
 
-      // Bước A: Tự động hiệu chỉnh (Calibration) tỉ lệ khuôn mặt
+      // Hiệu chỉnh khuôn mặt nếu cần
       if (!isCalibrated) {
         processSample(landmarks.points);
       }
 
-      // Bước B: Tính toán vị trí/góc quay của kính dựa trên hiệu chỉnh
+      // Tính toán Pose (Vị trí/Góc quay) và lưu vào Ref
       const transform = computeGlassesTransform(landmarks.points, calibratedEyeWidth);
-      
-      // Bước C: Cập nhật mô hình 3D (Pose Estimation)
-      renderFrame(transform);
+      latestTransformRef.current = transform;
 
-      // Bước D: Vẽ lớp Debug 2D (Nếu bật)
+      // VẼ DEBUG 2D (Chỉ chạy khi bật mode)
       if (isDebugMode && canvasRef.current) {
         const ctx = canvasRef.current.getContext('2d');
         if (ctx) {
+          ctx.clearRect(0, 0, 1280, 720); // Xóa frame cũ
           drawDebugLandmarks(ctx, rawPoints, 1280, 720);
-          drawEyeBoundingBox(ctx, transform, 1280, 720);
+          
+          // Sử dụng eye metrics thay vì transform để tránh lỗi crash
+          const metrics = extractEyeMetrics(landmarks.points);
+          drawEyeBoundingBox(ctx, metrics, 1280, 720);
+          
           drawNosePoint(ctx, rawPoints, 1280, 720);
         }
       }
     } else {
-      // Mất dấu khuôn mặt -> Ẩn kính 3D
-      renderFrame(null);
+      latestTransformRef.current = null;
+      if (isDebugMode && canvasRef.current) {
+        canvasRef.current.getContext('2d')?.clearRect(0, 0, 1280, 720);
+      }
     }
-  }, [isCalibrated, processSample, calibratedEyeWidth, renderFrame, isDebugMode, markTrackEnd]);
+  }, [isCalibrated, processSample, calibratedEyeWidth, isDebugMode, markTrackEnd]);
 
-  // 5. Kết nối vòng lặp Animation mượt mà
+  /**
+   * 7. LUỒNG RENDER ĐỒ HỌA (Render - 60fps)
+   * Lấy dữ liệu từ Ref và vẽ lên canvas WebGL
+   */
+  const handleFrame = useCallback(() => {
+    markFrame();
+    renderFrame(latestTransformRef.current);
+  }, [markFrame, renderFrame]);
+
+  // 8. Kết nối vào vòng lặp Animation chính
   useAnimationLoop({
     videoRef,
     faceMeshRef,
     onResults: handleResults,
     enabled: isActive && isAiReady,
-    onFrame: markFrame,
+    onFrame: handleFrame,
     onTrackStart: markTrackStart
   });
 
-  // 6. Các hàm xử lý sự kiện người dùng
+  // 9. Handlers
   const handleStart = async () => {
     setWebcamStatus('starting');
     await startCamera();
@@ -111,10 +131,9 @@ export default function App() {
 
   const handleSelectGlasses = async (glasses: GlassesModel) => {
     selectGlasses(glasses);
-    setLoadingModelId(glasses.id); // Hiện hiệu ứng chờ trên thẻ kính
-    
-    // Tải xong model 3D (thường mất 100-300ms do nén Draco)
-    setTimeout(() => setLoadingModelId(null), 500); 
+    setLoadingModelId(glasses.id);
+    // Giả lập thời gian nạp model GLB
+    setTimeout(() => setLoadingModelId(null), 500);
   };
 
   const handleCapture = async () => {
@@ -125,14 +144,13 @@ export default function App() {
           canvasRef.current, 
           selectedGlasses.name
         );
-        setPreviewUrl(url); // Hiện màn hình xem trước ảnh
+        setPreviewUrl(url);
       } catch (err) {
-        console.error("Lỗi chụp ảnh:", err);
+        console.error("Lỗi khi chụp ảnh:", err);
       }
     }
   };
 
-  // Đồng bộ trạng thái tải AI ban đầu
   useEffect(() => {
     setIsLoading(!isAiReady);
   }, [isAiReady, setIsLoading]);
@@ -142,7 +160,7 @@ export default function App() {
       {/* Header */}
       <header className="z-20 flex h-16 shrink-0 items-center justify-between border-b bg-white px-6 shadow-sm">
         <div className="flex items-center gap-2">
-          <span className="text-2xl" role="img" aria-label="glasses">👓</span>
+          <span className="text-2xl">👓</span>
           <h1 className="bg-gradient-to-r from-teal-600 to-indigo-600 bg-clip-text text-xl font-bold text-transparent">
             Glasses AR Try-On
           </h1>
@@ -163,13 +181,12 @@ export default function App() {
         )}
       </header>
 
-      {/* Main Layout */}
+      {/* Layout chính */}
       <div className="flex flex-1 flex-col overflow-hidden lg:flex-row">
         
         {/* Khu vực Camera (70%) */}
         <main className="relative flex w-full flex-col items-center justify-center bg-gray-950 lg:w-[70%]">
           
-          {/* FPS Stats & Overlays */}
           {isDebugMode && isActive && <FpsCounter stats={stats} />}
           
           {isActive && !isCalibrated && (
@@ -183,7 +200,6 @@ export default function App() {
           <div className="relative aspect-video w-full max-w-5xl overflow-hidden rounded-xl shadow-2xl">
             <WebcamView videoRef={videoRef} canvasRef={canvasRef} />
 
-            {/* Modal Preview ảnh sau khi chụp */}
             {previewUrl && selectedGlasses && (
               <PreviewModal 
                 imageUrl={previewUrl}
@@ -193,7 +209,6 @@ export default function App() {
               />
             )}
 
-            {/* Nút Đo lại (Reset Calibration) */}
             {isActive && isCalibrated && !previewUrl && (
               <button 
                 onClick={resetCalibration}
@@ -206,7 +221,6 @@ export default function App() {
               </button>
             )}
 
-            {/* Nút Chụp ảnh chính */}
             {isActive && isCalibrated && !previewUrl && (
               <div className="absolute bottom-8 left-1/2 z-30 -translate-x-1/2">
                 <CaptureButton 
@@ -219,7 +233,7 @@ export default function App() {
           </div>
         </main>
 
-        {/* Sidebar Danh mục kính (30%) */}
+        {/* Sidebar Catalog (30%) */}
         <aside className="z-10 flex w-full flex-col border-t bg-white shadow-lg lg:w-[30%] lg:border-l lg:border-t-0">
           <div className="flex-1 overflow-hidden">
             <GlassesCatalog

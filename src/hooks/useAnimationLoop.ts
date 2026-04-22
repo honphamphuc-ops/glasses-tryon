@@ -24,6 +24,9 @@ export function useAnimationLoop({
   const lastTrackTime = useRef<number>(0);
   const isRunning = useRef<boolean>(false);
   
+  // ✅ CÁCH FIX: Thêm KHÓA để AI không bị quá tải
+  const isProcessingRef = useRef<boolean>(false); 
+  
   const onResultsRef = useRef(onResults);
   useEffect(() => {
     onResultsRef.current = onResults;
@@ -47,33 +50,53 @@ export function useAnimationLoop({
 
     isRunning.current = true;
     
+    // Khi AI xử lý xong -> Chạy kết quả -> Mở khóa
     faceMeshRef.current.onResults((results: any) => {
       onResultsRef.current(results);
+      isProcessingRef.current = false; // ✅ Mở khóa cho frame tiếp theo
     });
 
-    const loop = async (now: number) => {
+    const loop = (now: number) => {
       if (!isRunning.current) return;
+
+      // 1. Luôn chạy Render 3D ở tốc độ cao nhất có thể (60 FPS)
+      if (onFrame) onFrame();
+
       const video = videoRef.current;
       const offscreenCanvas = offscreenCanvasRef.current;
       const ctx = offscreenCtxRef.current;
 
-      if (onFrame) onFrame();
-
-      if (video && video.readyState >= 2 && now - lastTrackTime.current >= TRACKING_INTERVAL) {
+      // 2. AI AI chỉ lấy frame khi ĐÃ MỞ KHÓA (chống DDoS ngầm)
+      if (
+        video && video.readyState >= 2 && 
+        now - lastTrackTime.current >= TRACKING_INTERVAL &&
+        !isProcessingRef.current // <--- Kiểm tra khóa ở đây
+      ) {
         lastTrackTime.current = now;
+        
         if (offscreenCanvas!.width !== video.videoWidth) {
           offscreenCanvas!.width = video.videoWidth;
           offscreenCanvas!.height = video.videoHeight;
         }
         ctx?.drawImage(video, 0, 0, offscreenCanvas!.width, offscreenCanvas!.height);
 
-        try {
-          if (onTrackStart) onTrackStart();
-          await faceMeshRef.current?.send({ image: offscreenCanvas! });
-        } catch (error) {
-          console.error("Lỗi khi send image cho FaceMesh:", error);
-        }
+        isProcessingRef.current = true; // ✅ Khóa lại ngay lập tức
+        if (onTrackStart) onTrackStart();
+        
+        // Gửi ảnh đi (Promise)
+    // Khi AI xử lý xong -> Chạy kết quả -> Mở khóa
+        faceMeshRef.current.onResults((results: any) => {
+          try {
+            onResultsRef.current(results);
+          } catch (err) {
+            console.error("Lỗi trong xử lý khuôn mặt (onResults):", err);
+          } finally {
+            // ✅ Bọc trong finally để LUÔN LUÔN mở khóa, dù code React có lỗi hay không!
+            isProcessingRef.current = false; 
+          }
+        });
       }
+      
       requestRef.current = requestAnimationFrame(loop);
     };
 

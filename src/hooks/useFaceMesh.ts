@@ -9,7 +9,6 @@ export function useFaceMesh() {
   const [isReady, setIsReady] = useState(false);
 
   useEffect(() => {
-    // Tránh crash nếu module thực sự không load được
     if (!FaceMeshClass) {
       console.error("Không thể load được module FaceMesh từ MediaPipe.");
       return;
@@ -18,10 +17,10 @@ export function useFaceMesh() {
     // Khởi tạo FaceMesh với CDN jsdelivr
     const faceMesh = new FaceMeshClass({
       locateFile: (file: string) =>
-        `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`,
+        `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`,
     });
 
-    // Cấu hình: 1 khuôn mặt, 478 điểm (refineLandmarks), độ tự tin 0.7
+    // Cấu hình: 1 khuôn mặt, 478 điểm (refineLandmarks)
     faceMesh.setOptions({
       maxNumFaces: 1,
       refineLandmarks: true, 
@@ -29,9 +28,10 @@ export function useFaceMesh() {
       minTrackingConfidence: 0.7,
     });
 
-    // Khi load xong model sẽ chạy callback này báo hiệu AI đã sẵn sàng
-    faceMesh.onResults(() => {
-      if (!isReady) setIsReady(true);
+    // ✅ CÁCH FIX Ở ĐÂY: Dùng hàm initialize() để đợi tải xong AI Model từ mạng
+    faceMesh.initialize().then(() => {
+      setIsReady(true);
+      console.log("✅ FaceMesh Model đã tải xong!");
     });
 
     faceMeshRef.current = faceMesh;
