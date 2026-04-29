@@ -15,3 +15,10 @@ export const KEY_POINTS = {
   RIGHT_EAR: 454,       // Vị trí: Gần tai phải. Dùng để: Tính toán Yaw.
   CHIN: 152             // Vị trí: Đáy cằm. Dùng để: Xác định tỷ lệ dọc của khuôn mặt.
 } as const;
+
+export const FACE_OVAL_INDICES = [
+  10, 338, 297, 332, 284, 251, 389, 356, 454,
+  323, 361, 288, 397, 365, 379, 378, 400, 377,
+  152, 148, 176, 149, 150, 136, 172, 58, 132,
+  93, 234, 127, 162, 21, 54, 103, 67, 109,
+] as const;

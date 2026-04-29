@@ -18,6 +18,8 @@ export interface AppStoreState {
   calibrate: (eyeWidth: number) => void;
   setIsLoading: (isLoading: boolean) => void;
   setLoadingModelId: (id: string | null) => void;
+  startLoadModel: (id: string) => void;
+  finishLoadModel: (id: string) => void;
   resetCalibration: () => void;
 }
 
@@ -39,5 +41,9 @@ export const useAppStore = create<AppStoreState>((set) => ({
   
   setIsLoading: (isLoading) => set({ isLoading }),
   setLoadingModelId: (id) => set({ loadingModelId: id }),
+  startLoadModel: (id) => set({ loadingModelId: id }),
+  finishLoadModel: (id) => set((state) => (
+    state.loadingModelId === id ? { loadingModelId: null } : state
+  )),
   resetCalibration: () => set({ calibratedEyeWidth: null }), // Hủy kết quả đo cũ
 }));

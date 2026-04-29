@@ -1,3 +1,9 @@
+export interface GlassesAdjustment {
+  scaleOverride?: number;
+  yOffset?: number;
+  zOffset?: number;
+}
+
 export interface GlassesModel {
   id: string;
   name: string;
@@ -7,6 +13,7 @@ export interface GlassesModel {
   thumbnail: string;
   category: 'sunglasses' | 'eyeglasses' | 'fashion';
   price: number;
-  scale?: number;
-  offset?: { x: number; y: number; z: number };
+  scaleOverride?: number;
+  yOffset?: number;
+  zOffset?: number;
 }

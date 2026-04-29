@@ -1,7 +1,13 @@
 import { KEY_POINTS } from '@/data/landmarkIndices';
+import { GlassesAdjustment } from '@/types/glasses';
 import { Point3D, GlassesTransform } from '@/types/landmarks';
 
 const REFERENCE_EYE_WIDTH = 0.28;
+const BRIDGE_OFFSET_RATIO = 0.12;
+
+function getAdjustmentValue(value: number | undefined, fallback: number): number {
+  return Number.isFinite(value) ? value as number : fallback;
+}
 
 function computeEyeWidth(left: Point3D, right: Point3D): number {
   return Math.hypot(right.x - left.x, right.y - left.y);
@@ -31,10 +37,22 @@ function estimatePitch(landmarks: Point3D[]): number {
   return (topDist - bottomDist) / (topDist + bottomDist);
 }
 
-export function computeGlassesTransform(landmarks: Point3D[], calibratedEyeWidth?: number | null): GlassesTransform {
+export function computeGlassesTransform(
+  landmarks: Point3D[],
+  calibratedEyeWidth?: number | null,
+  adjustment?: GlassesAdjustment | null
+): GlassesTransform {
   const leftOuter = landmarks[KEY_POINTS.LEFT_EYE_OUTER];
   const rightOuter = landmarks[KEY_POINTS.RIGHT_EYE_OUTER];
   const noseBridge = landmarks[KEY_POINTS.NOSE_BRIDGE];
+
+  if (!leftOuter || !rightOuter || !noseBridge) {
+    return {
+      position: { x: 0, y: 0, z: 0 },
+      rotation: { x: 0, y: 0, z: 0 },
+      scale: 1,
+    };
+  }
 
   const roll = computeRoll(leftOuter, rightOuter);
   const yaw = estimateYaw(landmarks);
@@ -42,7 +60,20 @@ export function computeGlassesTransform(landmarks: Point3D[], calibratedEyeWidth
 
   const currentEyeWidth = computeEyeWidth(leftOuter, rightOuter);
   const reference = calibratedEyeWidth ?? REFERENCE_EYE_WIDTH;
-  const scaleFactor = currentEyeWidth / reference;
+  const scaleOverride = getAdjustmentValue(adjustment?.scaleOverride, 1);
+  const yOffset = getAdjustmentValue(adjustment?.yOffset, 0);
+  const zOffset = getAdjustmentValue(adjustment?.zOffset, 0);
+  const scaleFactor = (currentEyeWidth / reference) * scaleOverride;
+  const eyeMidpoint = {
+    x: (leftOuter.x + rightOuter.x) / 2,
+    y: (leftOuter.y + rightOuter.y) / 2 + currentEyeWidth * (BRIDGE_OFFSET_RATIO + yOffset),
+    z: noseBridge.z,
+  };
 
-  return { position: noseBridge, rotation: { x: pitch, y: yaw, z: roll }, scale: scaleFactor };
+  return {
+    position: eyeMidpoint,
+    rotation: { x: pitch, y: yaw, z: roll },
+    scale: scaleFactor,
+    depthOffset: zOffset,
+  };
 }

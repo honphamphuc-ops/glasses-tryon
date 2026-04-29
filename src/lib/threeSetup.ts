@@ -27,14 +27,24 @@ export function setupThreeScene(canvas: HTMLCanvasElement, width: number, height
   renderer.setSize(width, height);
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2)); // Chống vỡ hạt trên màn hình Retina
   renderer.setClearColor(0x000000, 0); // Nền trong suốt hoàn toàn
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.15;
 
   // 4. Ánh sáng
-  const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+  const ambientLight = new THREE.AmbientLight(0xffffff, 1.25);
   scene.add(ambientLight);
 
-  const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
-  directionalLight.position.set(0, 1, 1);
-  scene.add(directionalLight);
+  const hemisphereLight = new THREE.HemisphereLight(0xffffff, 0x243b53, 1.1);
+  scene.add(hemisphereLight);
+
+  const keyLight = new THREE.DirectionalLight(0xffffff, 1.9);
+  keyLight.position.set(0.2, 1.2, 1.5);
+  scene.add(keyLight);
+
+  const fillLight = new THREE.DirectionalLight(0xcfe8ff, 0.9);
+  fillLight.position.set(-0.8, 0.6, 1.1);
+  scene.add(fillLight);
 
   // 5. Hàm tiện ích
   const resize = (newWidth: number, newHeight: number) => {

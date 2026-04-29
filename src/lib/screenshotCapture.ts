@@ -1,6 +1,43 @@
 /**
  * Xử lý chụp ảnh kết hợp Video và Canvas 3D
  */
+export const GLASSES_CAPTURE_HISTORY_KEY = 'glasses-tryon.captureHistory';
+
+interface CaptureHistoryEntry {
+  capturedAt: number;
+  fileName: string;
+  glassesName: string;
+}
+
+export function ensureCaptureHistoryStorage(): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    if (window.localStorage.getItem(GLASSES_CAPTURE_HISTORY_KEY) === null) {
+      window.localStorage.setItem(GLASSES_CAPTURE_HISTORY_KEY, JSON.stringify([]));
+    }
+  } catch (error) {
+    console.warn('Không thể khởi tạo capture history trong localStorage:', error);
+  }
+}
+
+function appendCaptureHistory(entry: CaptureHistoryEntry): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    const currentRaw = window.localStorage.getItem(GLASSES_CAPTURE_HISTORY_KEY);
+    const current = currentRaw ? JSON.parse(currentRaw) as CaptureHistoryEntry[] : [];
+    const next = [entry, ...current].slice(0, 20);
+    window.localStorage.setItem(GLASSES_CAPTURE_HISTORY_KEY, JSON.stringify(next));
+  } catch (error) {
+    console.warn('Không thể lưu capture history:', error);
+  }
+}
+
 export async function captureSnapshot(
   videoEl: HTMLVideoElement,
   outputCanvas: HTMLCanvasElement,
@@ -38,6 +75,7 @@ export async function captureSnapshot(
   const timestamp = new Date().getTime();
   link.download = `tryon-${glassesName.toLowerCase().replace(/\s+/g, '-')}-${timestamp}.png`;
   link.href = dataUrl;
+  appendCaptureHistory({ capturedAt: timestamp, fileName: link.download, glassesName });
   link.click();
 
   return dataUrl;

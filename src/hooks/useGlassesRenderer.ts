@@ -2,10 +2,10 @@ import { useEffect, useRef, useCallback } from 'react';
 import * as THREE from 'three';
 import { useAppStore } from '@/store/useAppStore';
 import { setupThreeScene, ThreeScene } from '@/lib/threeSetup';
-import { loadGlassesModel } from '@/lib/glassesLoader';
-import { createOcclusionMask } from '@/lib/occlusionMask';
+import { disposeGlassesModel, loadGlassesModel } from '@/lib/glassesLoader';
+import { createOcclusionMask, updateOcclusionMask } from '@/lib/occlusionMask';
 import { applyTransformToModel } from '@/lib/poseEstimator';
-import { GlassesTransform } from '@/types/landmarks';
+import { GlassesTransform, Point3D } from '@/types/landmarks';
 
 export function useGlassesRenderer(
   outputCanvasRef: React.RefObject<HTMLCanvasElement>,
@@ -13,12 +13,23 @@ export function useGlassesRenderer(
   height: number
 ) {
   // Lấy state từ Zustand store
-  const { selectedGlasses, calibratedEyeWidth } = useAppStore();
+  const { selectedGlasses, calibratedEyeWidth, startLoadModel, finishLoadModel } = useAppStore();
   
   // Refs lưu trữ các đối tượng 3D để tránh re-render không cần thiết
   const sceneRef = useRef<ThreeScene | null>(null);
   const modelRef = useRef<THREE.Group | null>(null);
   const maskRef = useRef<THREE.Mesh | null>(null);
+  const loadRequestRef = useRef(0);
+
+  const removeCurrentModel = useCallback((sceneObj: ThreeScene) => {
+    if (!modelRef.current) {
+      return;
+    }
+
+    sceneObj.scene.remove(modelRef.current);
+    disposeGlassesModel(modelRef.current);
+    modelRef.current = null;
+  }, []);
 
   // 1. KHỞI TẠO SCENE VÀ MẶT NẠ (Chỉ chạy 1 lần khi Canvas xuất hiện)
   useEffect(() => {
@@ -36,9 +47,20 @@ export function useGlassesRenderer(
 
     // Cleanup khi unmount
     return () => {
+      removeCurrentModel(threeScene);
+      threeScene.scene.remove(mask);
+      mask.geometry.dispose();
+      const material = mask.material;
+      if (Array.isArray(material)) {
+        material.forEach((item) => item.dispose());
+      } else {
+        material.dispose();
+      }
+      maskRef.current = null;
+      sceneRef.current = null;
       threeScene.dispose();
     };
-  }, [outputCanvasRef, width, height]);
+  }, [outputCanvasRef, width, height, removeCurrentModel]);
 
   // 2. TẢI VÀ CHUYỂN ĐỔI KÍNH (Chạy mỗi khi user chọn kính mới)
   // ★ [XỬ LÝ CALIBRATION KHI ĐỔI KÍNH MỚI]
@@ -56,41 +78,53 @@ export function useGlassesRenderer(
 
     // Nếu chọn "None" hoặc chưa chọn, xóa kính cũ đi
     if (!selectedGlasses) {
-      if (modelRef.current) {
-        sceneObj.scene.remove(modelRef.current);
-        modelRef.current = null;
-      }
+      loadRequestRef.current += 1;
+      removeCurrentModel(sceneObj);
       if (maskRef.current) maskRef.current.visible = false;
       return;
     }
 
-    let isMounted = true;
+    let isCancelled = false;
+    const requestId = ++loadRequestRef.current;
+    startLoadModel(selectedGlasses.id);
 
     const initModel = async () => {
-      // Gọi thư viện load file .glb (đã nén Draco)
-      const modelGroup = await loadGlassesModel(selectedGlasses.modelPath);
-      
-      if (!isMounted) return;
+      try {
+        const modelGroup = await loadGlassesModel(selectedGlasses.modelPath);
 
-      // Xóa model cũ ra khỏi scene trước khi add cái mới vào
-      if (modelRef.current) {
-        sceneObj.scene.remove(modelRef.current);
+        if (isCancelled || requestId !== loadRequestRef.current) {
+          disposeGlassesModel(modelGroup);
+          return;
+        }
+
+        removeCurrentModel(sceneObj);
+        modelGroup.visible = false;
+        modelGroup.renderOrder = 0;
+        modelGroup.traverse((child) => {
+          if ((child as THREE.Mesh).isMesh) {
+            child.renderOrder = 0;
+          }
+        });
+        sceneObj.scene.add(modelGroup);
+        modelRef.current = modelGroup;
+      } catch (error) {
+        console.error('Không thể nạp model kính:', error);
+      } finally {
+        if (!isCancelled && requestId === loadRequestRef.current) {
+          finishLoadModel(selectedGlasses.id);
+        }
       }
-
-      modelGroup.visible = false; // Tạm ẩn để tránh hiện chớp nhoáng giữa màn hình
-      sceneObj.scene.add(modelGroup);
-      modelRef.current = modelGroup;
     };
 
-    initModel();
+    void initModel();
 
     return () => {
-      isMounted = false; // Ngăn lỗi "Race Condition" nếu người dùng click đổi kính liên tục
+      isCancelled = true;
     };
-  }, [selectedGlasses]);
+  }, [selectedGlasses, startLoadModel, finishLoadModel, removeCurrentModel]);
 
   // 3. VÒNG LẶP RENDER (Được gọi 60 lần/giây từ useAnimationLoop)
-  const renderFrame = useCallback((transform: GlassesTransform | null) => {
+  const renderFrame = useCallback((transform: GlassesTransform | null, landmarks: Point3D[] | null) => {
     const sceneObj = sceneRef.current;
     const model = modelRef.current;
     const mask = maskRef.current;
@@ -98,9 +132,9 @@ export function useGlassesRenderer(
     if (!sceneObj || !outputCanvasRef.current) return;
 
     // Nếu MediaPipe tìm thấy mặt và đã tính toán xong tọa độ
-    if (transform && model && mask) {
+    if (transform && landmarks && model && mask) {
       model.visible = true;
-      mask.visible = true;
+      updateOcclusionMask(mask, landmarks, sceneObj.camera, outputCanvasRef.current);
 
       // Bước A: Áp dụng vị trí, góc quay, tỉ lệ cho Kính
       applyTransformToModel(
@@ -112,13 +146,6 @@ export function useGlassesRenderer(
         calibratedEyeWidth
       );
 
-      // Bước B: Đồng bộ Mặt nạ (Occlusion Mask) bám theo Kính
-      mask.position.copy(model.position);
-      mask.quaternion.copy(model.quaternion);
-      
-      // Scale mặt nạ to hơn kính một chút để che được phần càng kính cắm vào tai
-      mask.scale.setScalar(transform.scale * 1.1);
-
     } else if (model && mask) {
       // Mất mặt (hoặc đưa tay che camera) -> Ẩn kính đi
       model.visible = false;
@@ -129,5 +156,5 @@ export function useGlassesRenderer(
     sceneObj.renderer.render(sceneObj.scene, sceneObj.camera);
   }, [calibratedEyeWidth, outputCanvasRef]);
 
-  return { renderFrame, sceneRef, modelRef };
+  return { renderFrame, sceneRef, modelRef, maskRef };
 }

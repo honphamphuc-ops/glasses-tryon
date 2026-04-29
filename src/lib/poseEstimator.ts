@@ -1,7 +1,10 @@
 import * as THREE from 'three';
+import { Point3D } from '@/types/landmarks';
 import { GlassesTransform } from '@/types/landmarks';
 
 const REFERENCE_EYE_WIDTH = 0.28;
+const BASE_MODEL_DEPTH = -0.65;
+const DEPTH_SENSITIVITY = 0.0015;
 
 export function ndcToWorld(
   nx: number,
@@ -16,12 +19,33 @@ export function ndcToWorld(
   const heightAtDepth = 2 * Math.tan(vFOV / 2) * Math.abs(depth);
   const widthAtDepth = heightAtDepth * (canvasWidth / canvasHeight);
 
-  // target.x = -(nx - 0.5) * widthAtDepth;
-  target.x = (nx - 0.5) * widthAtDepth;
+  target.x = -(nx - 0.5) * widthAtDepth;
   target.y = -(ny - 0.5) * heightAtDepth;
   target.z = depth;
 
   return target;
+}
+
+export function computeModelDepth(noseBridgeZ: number): number {
+  return THREE.MathUtils.clamp(
+    BASE_MODEL_DEPTH - noseBridgeZ * DEPTH_SENSITIVITY,
+    -0.9,
+    -0.45
+  );
+}
+
+export function landmarkToWorld(
+  point: Point3D,
+  camera: THREE.PerspectiveCamera,
+  canvasWidth: number,
+  canvasHeight: number,
+  depthOffset = 0
+): THREE.Vector3 {
+  const nx = THREE.MathUtils.clamp(point.x / canvasWidth, 0, 1);
+  const ny = THREE.MathUtils.clamp(point.y / canvasHeight, 0, 1);
+  const depth = THREE.MathUtils.clamp(computeModelDepth(point.z) + depthOffset, -0.95, -0.35);
+
+  return ndcToWorld(nx, ny, depth, camera, canvasWidth, canvasHeight);
 }
 
 export function computeWorldScale(
@@ -46,23 +70,12 @@ export function applyTransformToModel(
   canvasHeight: number,
   _calibratedEyeWidth?: number | null // Đã thêm dấu gạch dưới để TS bỏ qua cảnh báo unused
 ): void {
-  // const worldPos = ndcToWorld(
-  //   transform.position.x,
-  //   transform.position.y,
-  //   -0.65,
-  //   camera,
-  //   canvasWidth,
-  //   canvasHeight
-  const nx = transform.position.x / canvasWidth;
-  const ny = transform.position.y / canvasHeight;
-
-  const worldPos = ndcToWorld(
-    nx,
-    ny,
-    -0.65,
+  const worldPos = landmarkToWorld(
+    transform.position,
     camera,
     canvasWidth,
-    canvasHeight
+    canvasHeight,
+    transform.depthOffset ?? 0
   );
   
   model.position.lerp(worldPos, 0.25);

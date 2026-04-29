@@ -32,4 +32,5 @@ export interface GlassesTransform {
   position: Point3D;
   rotation: { x: number; y: number; z: number };
   scale: number;
+  depthOffset?: number;
 }

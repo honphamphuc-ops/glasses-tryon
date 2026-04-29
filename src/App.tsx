@@ -12,6 +12,7 @@ import { useRenderStats } from '@/hooks/useRenderStats';
 import { WebcamView } from '@/components/WebcamView';
 import { GlassesCatalog } from '@/components/GlassesCatalog';
 import { CaptureButton } from '@/components/CaptureButton';
+import { DebugTuningPanel } from '@/components/DebugTuningPanel';
 import { PermissionModal } from '@/components/PermissionModal';
 import { CalibrationOverlay } from '@/components/CalibrationOverlay';
 import { FpsCounter } from '@/components/FpsCounter';
@@ -26,25 +27,53 @@ import {
   extractEyeMetrics 
 } from '@/lib/faceMeshProcessor';
 import { computeGlassesTransform } from '@/lib/glassesMapper';
+import { runQAChecklist } from '@/lib/qaChecklist';
 import { drawEyeBoundingBox, drawNosePoint } from '@/lib/debugRenderer';
-import { captureSnapshot } from '@/lib/screenshotCapture';
-import { GlassesModel } from '@/types/glasses';
+import { captureSnapshot, ensureCaptureHistoryStorage } from '@/lib/screenshotCapture';
+import { preloadGlasses } from '@/lib/glassesLoader';
+import { GlassesAdjustment, GlassesModel } from '@/types/glasses';
+import { GlassesTransform, Point3D } from '@/types/landmarks';
+
+interface RenderFrameState {
+  transform: GlassesTransform | null;
+  landmarks: Point3D[] | null;
+}
+
+const DEFAULT_ADJUSTMENT: Required<GlassesAdjustment> = {
+  scaleOverride: 1,
+  yOffset: 0,
+  zOffset: 0,
+};
+
+function adjustmentFromModel(glasses: GlassesModel | null): Required<GlassesAdjustment> {
+  return {
+    scaleOverride: glasses?.scaleOverride ?? DEFAULT_ADJUSTMENT.scaleOverride,
+    yOffset: glasses?.yOffset ?? DEFAULT_ADJUSTMENT.yOffset,
+    zOffset: glasses?.zOffset ?? DEFAULT_ADJUSTMENT.zOffset,
+  };
+}
 
 export default function App() {
   // 1. Refs để quản lý dữ liệu không cần re-render
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const latestTransformRef = useRef<any>(null); // Lưu tọa độ kính để luồng Render lấy liên tục
+  const latestFrameRef = useRef<RenderFrameState>({ transform: null, landmarks: null });
 
   // 2. Local State
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [debugAdjustment, setDebugAdjustment] = useState<Required<GlassesAdjustment>>(DEFAULT_ADJUSTMENT);
+  const [debugStatus, setDebugStatus] = useState<string | null>(null);
+  const [preloadProgress, setPreloadProgress] = useState({
+    loaded: 0,
+    total: glassesCatalog.length,
+  });
+  const isTuningDebug = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === 'true';
 
   // 3. Zustand Store
   const { 
     selectedGlasses, 
     selectGlasses, 
     loadingModelId,
-    setLoadingModelId,
     setIsLoading, 
     calibratedEyeWidth,
     resetCalibration,
@@ -58,7 +87,7 @@ export default function App() {
   const { processSample, isCalibrated, progress } = useCalibration();
   
   // 5. Khởi tạo Renderer 3D
-  const { renderFrame } = useGlassesRenderer(canvasRef, 1280, 720);
+  const { renderFrame, sceneRef, modelRef, maskRef } = useGlassesRenderer(canvasRef, 1280, 720);
 
   /**
    * 6. LUỒNG XỬ LÝ AI (Tracking - 30fps)
@@ -78,8 +107,11 @@ export default function App() {
       }
 
       // Tính toán Pose (Vị trí/Góc quay) và lưu vào Ref
-      const transform = computeGlassesTransform(landmarks.points, calibratedEyeWidth);
-      latestTransformRef.current = transform;
+      const activeAdjustment = isTuningDebug && selectedGlasses
+        ? { ...selectedGlasses, ...debugAdjustment }
+        : selectedGlasses;
+      const transform = computeGlassesTransform(landmarks.points, calibratedEyeWidth, activeAdjustment);
+      latestFrameRef.current = { transform, landmarks: landmarks.points };
 
       // VẼ DEBUG 2D (Chỉ chạy khi bật mode)
       if (isDebugMode && canvasRef.current) {
@@ -96,12 +128,21 @@ export default function App() {
         }
       }
     } else {
-      latestTransformRef.current = null;
+      latestFrameRef.current = { transform: null, landmarks: null };
       if (isDebugMode && canvasRef.current) {
         canvasRef.current.getContext('2d')?.clearRect(0, 0, 1280, 720);
       }
     }
-  }, [isCalibrated, processSample, calibratedEyeWidth, isDebugMode, markTrackEnd]);
+  }, [
+    calibratedEyeWidth,
+    debugAdjustment,
+    isCalibrated,
+    isDebugMode,
+    isTuningDebug,
+    markTrackEnd,
+    processSample,
+    selectedGlasses,
+  ]);
 
   /**
    * 7. LUỒNG RENDER ĐỒ HỌA (Render - 60fps)
@@ -109,7 +150,7 @@ export default function App() {
    */
   const handleFrame = useCallback(() => {
     markFrame();
-    renderFrame(latestTransformRef.current);
+    renderFrame(latestFrameRef.current.transform, latestFrameRef.current.landmarks);
   }, [markFrame, renderFrame]);
 
   // 8. Kết nối vào vòng lặp Animation chính
@@ -130,10 +171,11 @@ export default function App() {
   };
 
   const handleSelectGlasses = async (glasses: GlassesModel) => {
+    if (selectedGlasses?.id === glasses.id && loadingModelId !== glasses.id) {
+      return;
+    }
+
     selectGlasses(glasses);
-    setLoadingModelId(glasses.id);
-    // Giả lập thời gian nạp model GLB
-    setTimeout(() => setLoadingModelId(null), 500);
   };
 
   const handleCapture = async () => {
@@ -154,6 +196,62 @@ export default function App() {
   useEffect(() => {
     setIsLoading(!isAiReady);
   }, [isAiReady, setIsLoading]);
+
+  useEffect(() => {
+    ensureCaptureHistoryStorage();
+  }, []);
+
+  useEffect(() => {
+    setDebugAdjustment(adjustmentFromModel(selectedGlasses));
+    setDebugStatus(null);
+  }, [selectedGlasses]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    void preloadGlasses(
+      glassesCatalog.map((glasses) => glasses.modelPath),
+      (loaded, total) => {
+        if (!isMounted) {
+          return;
+        }
+
+        setPreloadProgress({ loaded, total });
+      }
+    );
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const isPreloadingModels = preloadProgress.total > 0 && preloadProgress.loaded < preloadProgress.total;
+  const showModelOverlay = Boolean(loadingModelId);
+
+  const handleCopyDebugConfig = useCallback(() => {
+    if (!selectedGlasses) {
+      setDebugStatus('Chưa có mẫu kính nào được chọn.');
+      return;
+    }
+
+    const snippet = `scaleOverride: ${debugAdjustment.scaleOverride.toFixed(3)}, yOffset: ${debugAdjustment.yOffset.toFixed(3)}, zOffset: ${debugAdjustment.zOffset.toFixed(3)}`;
+
+    navigator.clipboard.writeText(snippet)
+      .then(() => setDebugStatus(`Đã copy config cho ${selectedGlasses.name}.`))
+      .catch(() => setDebugStatus('Không copy được vào clipboard.'));
+  }, [debugAdjustment, selectedGlasses]);
+
+  const handleRunQaChecklist = useCallback(() => {
+    const results = runQAChecklist({
+      renderer: sceneRef.current?.renderer ?? null,
+      scene: sceneRef.current?.scene ?? null,
+      occlusionMesh: maskRef.current,
+      glassesModel: modelRef.current,
+    });
+
+    const failed = results.filter((result) => !result.passed).length;
+    setDebugStatus(failed === 0 ? 'QA checklist: tất cả check đều pass.' : `QA checklist: còn ${failed} check chưa pass, xem console.`);
+  }, [maskRef, modelRef, sceneRef]);
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-gray-50 font-sans text-gray-900">
@@ -200,6 +298,23 @@ export default function App() {
           <div className="relative aspect-video w-full max-w-5xl overflow-hidden rounded-xl shadow-2xl">
             <WebcamView videoRef={videoRef} canvasRef={canvasRef} />
 
+            {showModelOverlay && (
+              <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-slate-950/20 backdrop-blur-[2px]">
+                <div className="rounded-2xl border border-white/10 bg-black/55 px-5 py-4 text-center text-white shadow-2xl backdrop-blur-md">
+                  <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/80 border-t-transparent" />
+                  <p className="text-sm font-semibold">Đang tải mô hình 3D...</p>
+                  <p className="mt-1 text-xs text-white/70">
+                    {selectedGlasses ? selectedGlasses.name : 'Đang đồng bộ kính mới'}
+                  </p>
+                  {isPreloadingModels && (
+                    <p className="mt-2 text-[11px] text-white/55">
+                      Thư viện sẵn sàng {preloadProgress.loaded}/{preloadProgress.total}
+                    </p>
+                  )}
+                </div>
+              </div>
+            )}
+
             {previewUrl && selectedGlasses && (
               <PreviewModal 
                 imageUrl={previewUrl}
@@ -207,18 +322,6 @@ export default function App() {
                 onClose={() => setPreviewUrl(null)}
                 onRetake={() => setPreviewUrl(null)}
               />
-            )}
-
-            {isActive && isCalibrated && !previewUrl && (
-              <button 
-                onClick={resetCalibration}
-                className="absolute bottom-6 left-6 z-30 flex items-center gap-2 rounded-full bg-black/50 px-4 py-2 text-xs font-medium text-white backdrop-blur-md transition hover:bg-black/70 active:scale-95 shadow-lg"
-              >
-                <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                Đo lại khuôn mặt
-              </button>
             )}
 
             {isActive && isCalibrated && !previewUrl && (
@@ -241,8 +344,24 @@ export default function App() {
               selectedId={selectedGlasses?.id ?? null}
               loadingId={loadingModelId}
               onSelect={handleSelectGlasses}
+              onResetCalibration={resetCalibration}
+              isCalibrated={isCalibrated}
+              preloadProgress={preloadProgress}
             />
           </div>
+
+          {isTuningDebug && (
+            <div className="border-t border-amber-100 bg-white px-4 py-4">
+              <DebugTuningPanel
+                selectedGlasses={selectedGlasses}
+                adjustment={debugAdjustment}
+                onAdjustmentChange={setDebugAdjustment}
+                onCopyConfig={handleCopyDebugConfig}
+                onRunQa={handleRunQaChecklist}
+                statusMessage={debugStatus}
+              />
+            </div>
+          )}
 
           <div className="bg-gray-50 border-t p-3 text-center text-[10px] text-gray-400 uppercase tracking-widest">
             Powered by Three.js & MediaPipe
