@@ -2,7 +2,8 @@ import { KEY_POINTS } from '@/data/landmarkIndices';
 import { GlassesAdjustment } from '@/types/glasses';
 import { Point3D, GlassesTransform } from '@/types/landmarks';
 
-const REFERENCE_EYE_WIDTH = 0.28;
+// Pixel distance between outer eye corners at a reference viewing distance.
+const REFERENCE_EYE_WIDTH = 230;
 const BRIDGE_OFFSET_RATIO = 0.12;
 
 function getAdjustmentValue(value: number | undefined, fallback: number): number {
@@ -14,7 +15,8 @@ function computeEyeWidth(left: Point3D, right: Point3D): number {
 }
 
 function computeRoll(left: Point3D, right: Point3D): number {
-  return Math.atan2(right.y - left.y, right.x - left.x);
+  // Negated to compensate for CSS scaleX(-1) mirror flip on video/canvas.
+  return -Math.atan2(right.y - left.y, right.x - left.x);
 }
 
 function estimateYaw(landmarks: Point3D[]): number {
@@ -24,16 +26,17 @@ function estimateYaw(landmarks: Point3D[]): number {
   if (!nose || !leftEar || !rightEar) return 0;
   const leftDist = Math.hypot(nose.x - leftEar.x, nose.y - leftEar.y);
   const rightDist = Math.hypot(nose.x - rightEar.x, nose.y - rightEar.y);
-  return (leftDist - rightDist) / (leftDist + rightDist);
+  // Negated to compensate for CSS scaleX(-1) mirror flip.
+  return -(leftDist - rightDist) / (leftDist + rightDist);
 }
 
 function estimatePitch(landmarks: Point3D[]): number {
-  const nose = landmarks[KEY_POINTS.NOSE_BRIDGE];
+  const noseBridge = landmarks[KEY_POINTS.NOSE_BRIDGE];
   const chin = landmarks[KEY_POINTS.CHIN];
   const forehead = landmarks[10];
-  if (!nose || !chin || !forehead) return 0;
-  const topDist = Math.hypot(nose.x - forehead.x, nose.y - forehead.y);
-  const bottomDist = Math.hypot(nose.x - chin.x, nose.y - chin.y);
+  if (!noseBridge || !chin || !forehead) return 0;
+  const topDist = Math.hypot(noseBridge.x - forehead.x, noseBridge.y - forehead.y);
+  const bottomDist = Math.hypot(noseBridge.x - chin.x, noseBridge.y - chin.y);
   return (topDist - bottomDist) / (topDist + bottomDist);
 }
 

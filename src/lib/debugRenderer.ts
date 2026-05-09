@@ -1,5 +1,4 @@
 import { KEY_POINTS } from '@/data/landmarkIndices';
-import { FaceTransform } from '@/types/landmarks';
 
 export function drawEyeBoundingBox(ctx: CanvasRenderingContext2D, metrics: any, w: number, h: number) {
   const { eyeWidth, midpoint } = metrics;
@@ -49,23 +48,5 @@ export function drawFPS(ctx: CanvasRenderingContext2D, fps: number, trackingFps:
   ctx.fillText(`Render: ${fps} FPS`, 20, 30);
   ctx.fillText(`Track:  ${trackingFps} FPS`, 20, 48);
   
-  ctx.restore();
-}
-
-export function drawGlassesPlaceholder(ctx: CanvasRenderingContext2D, transform: FaceTransform, w: number, h: number) {
-  const px = transform.position.x * w;
-  const py = transform.position.y * h;
-  const scaleW = transform.scale * w;
-  const scaleH = scaleW * 0.3;
-
-  ctx.strokeStyle = '#00FFFF'; // Màu Cyan
-  ctx.lineWidth = 3;
-  
-  ctx.save();
-  ctx.translate(px, py);
-  ctx.rotate(transform.rotation.z); // Lắc lư theo trục Z (nghiêng đầu)
-  
-  // Vẽ hình chữ nhật đại diện cho khung kính
-  ctx.strokeRect(-scaleW / 2, -scaleH / 2, scaleW, scaleH);
   ctx.restore();
 }

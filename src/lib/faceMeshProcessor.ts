@@ -16,7 +16,7 @@ export function extractLandmarks(
   const leftEye = points[KEY_POINTS.LEFT_EYE_OUTER] || points[33];
   const rightEye = points[KEY_POINTS.RIGHT_EYE_OUTER] || points[263];
   const noseBridge = points[KEY_POINTS.NOSE_BRIDGE] || points[168];
-  const noseTop = points[1] || points[1];
+  const noseTop = points[1];
   const leftTemple = points[KEY_POINTS.LEFT_EAR] || points[234];
   const rightTemple = points[KEY_POINTS.RIGHT_EAR] || points[454];
 

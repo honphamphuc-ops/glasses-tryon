@@ -10,6 +10,7 @@ interface GlassesCatalogProps {
   glasses: GlassesModel[];
   selectedId: string | null;
   loadingId: string | null;
+  disabled?: boolean;
   onSelect: (glasses: GlassesModel) => void;
   onResetCalibration: () => void;
   isCalibrated: boolean;
@@ -20,6 +21,7 @@ export function GlassesCatalog({
   glasses,
   selectedId,
   loadingId,
+  disabled = false,
   onSelect,
   onResetCalibration,
   isCalibrated,
@@ -52,7 +54,7 @@ export function GlassesCatalog({
         </div>
       </div>
 
-      <div className="flex-1 overflow-hidden">
+      <div className="relative flex-1 overflow-hidden">
         <div className="custom-scrollbar h-full overflow-y-auto px-4 py-4">
           <div className="flex gap-4 overflow-x-auto pb-2 snap-x snap-mandatory md:grid md:grid-cols-2 md:gap-4 md:overflow-visible md:pb-0">
           {glasses.map((g) => (
@@ -61,11 +63,20 @@ export function GlassesCatalog({
               glasses={g}
               isSelected={g.id === selectedId}
               isLoading={g.id === loadingId}
+              disabled={disabled}
               onClick={onSelect}
             />
           ))}
           </div>
         </div>
+
+        {disabled && (
+          <div className="absolute inset-0 z-10 flex items-center justify-center bg-white/80 backdrop-blur-sm">
+            <p className="max-w-[16rem] px-6 text-center text-sm font-semibold leading-6 text-slate-700">
+              Đang hiệu chỉnh khuôn mặt... Vui lòng nhìn thẳng vào camera
+            </p>
+          </div>
+        )}
       </div>
 
       <div className="border-t border-slate-200 bg-slate-50 px-4 py-3">

@@ -12,17 +12,45 @@ const dracoLoader = new DRACOLoader();
 dracoLoader.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.6/');
 dracoLoader.preload(); // Tải decoder ngầm trước
 
-let dracoConfigured = true;
+let dracoConfigured = false;
 
 const gltfLoader = new GLTFLoader();
-gltfLoader.setDRACOLoader(dracoLoader);
+try {
+  gltfLoader.setDRACOLoader(dracoLoader);
+  dracoConfigured = true;
+} catch (error) {
+  console.warn('DRACOLoader setup failed:', error);
+  dracoConfigured = false;
+}
 
-// Fallback: Nếu lỗi load model thì trả về 1 cục hộp đỏ để debug
+// Fallback: Nếu lỗi load model thì trả về khung kính wireframe để dễ nhận biết.
 function createFallbackModel(): THREE.Group {
   const group = new THREE.Group();
-  const geometry = new THREE.BoxGeometry(0.3, 0.1, 0.1);
-  const material = new THREE.MeshBasicMaterial({ color: 0xff0000, wireframe: true });
-  group.add(new THREE.Mesh(geometry, material));
+  const material = new THREE.MeshBasicMaterial({ color: 0xff4d4f, wireframe: true });
+
+  const leftLens = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.008, 10, 32), material.clone());
+  leftLens.position.set(-0.09, 0, 0);
+  leftLens.scale.set(1, 0.9, 1);
+
+  const rightLens = new THREE.Mesh(new THREE.TorusGeometry(0.065, 0.008, 10, 32), material.clone());
+  rightLens.position.set(0.09, 0, 0);
+  rightLens.scale.set(1, 0.9, 1);
+
+  const bridge = new THREE.Mesh(new THREE.CapsuleGeometry(0.006, 0.04, 2, 8), material.clone());
+  bridge.rotation.z = Math.PI / 2;
+  bridge.position.y = 0.005;
+
+  const leftTemple = new THREE.Mesh(new THREE.CapsuleGeometry(0.005, 0.12, 2, 8), material.clone());
+  leftTemple.rotation.z = Math.PI / 2;
+  leftTemple.rotation.y = Math.PI / 5;
+  leftTemple.position.set(-0.17, 0.01, -0.045);
+
+  const rightTemple = new THREE.Mesh(new THREE.CapsuleGeometry(0.005, 0.12, 2, 8), material.clone());
+  rightTemple.rotation.z = Math.PI / 2;
+  rightTemple.rotation.y = -Math.PI / 5;
+  rightTemple.position.set(0.17, 0.01, -0.045);
+
+  group.add(leftLens, rightLens, bridge, leftTemple, rightTemple);
   return group;
 }
 
@@ -127,9 +155,7 @@ async function loadModelTemplate(url: string): Promise<THREE.Group> {
       undefined,
       (error) => {
         console.error(`Lỗi khi load model ${url}:`, error);
-        const fallback = createFallbackModel();
-        modelCache.set(url, fallback);
-        resolve(fallback);
+        resolve(createFallbackModel());
       }
     );
   });

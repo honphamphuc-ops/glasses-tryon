@@ -2,7 +2,8 @@ import * as THREE from 'three';
 import { Point3D } from '@/types/landmarks';
 import { GlassesTransform } from '@/types/landmarks';
 
-const REFERENCE_EYE_WIDTH = 0.28;
+// Pixel distance between outer eye corners at a reference viewing distance.
+const REFERENCE_EYE_WIDTH = 230;
 const BASE_MODEL_DEPTH = -0.65;
 const DEPTH_SENSITIVITY = 0.0015;
 
@@ -67,8 +68,7 @@ export function applyTransformToModel(
   transform: GlassesTransform,
   camera: THREE.PerspectiveCamera,
   canvasWidth: number,
-  canvasHeight: number,
-  _calibratedEyeWidth?: number | null // Đã thêm dấu gạch dưới để TS bỏ qua cảnh báo unused
+  canvasHeight: number
 ): void {
   const worldPos = landmarkToWorld(
     transform.position,

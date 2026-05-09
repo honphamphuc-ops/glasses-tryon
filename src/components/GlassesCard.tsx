@@ -5,6 +5,7 @@ interface GlassesCardProps {
   glasses: GlassesModel;
   isSelected: boolean;
   isLoading: boolean;
+  disabled?: boolean;
   onClick: (glasses: GlassesModel) => void;
 }
 
@@ -16,7 +17,7 @@ const CATEGORY_LABELS: Record<GlassesModel['category'], string> = {
   fashion: 'Fashion',
 };
 
-export function GlassesCard({ glasses, isSelected, isLoading, onClick }: GlassesCardProps) {
+export function GlassesCard({ glasses, isSelected, isLoading, disabled = false, onClick }: GlassesCardProps) {
   const [hasImageError, setHasImageError] = useState(false);
   const displayPrice = glasses.price < 1000 ? Math.round(glasses.price * USD_TO_VND_RATE) : Math.round(glasses.price);
   const formattedPrice = new Intl.NumberFormat('vi-VN', {
@@ -31,11 +32,14 @@ export function GlassesCard({ glasses, isSelected, isLoading, onClick }: Glasses
   return (
     <button
       onClick={() => onClick(glasses)}
+      disabled={disabled}
       aria-pressed={isSelected}
       className={`group relative flex w-[15rem] shrink-0 snap-center flex-col overflow-hidden rounded-[1.75rem] border p-3 text-left transition-all duration-200 md:w-auto ${
-        isSelected
-          ? 'border-teal-500 bg-teal-50/80 shadow-lg shadow-teal-900/10 ring-1 ring-teal-500/40'
-          : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-teal-300 hover:shadow-lg hover:shadow-slate-900/5'
+        disabled
+          ? 'cursor-not-allowed opacity-50'
+          : isSelected
+            ? 'border-teal-500 bg-teal-50/80 shadow-lg shadow-teal-900/10 ring-1 ring-teal-500/40'
+            : 'border-slate-200 bg-white hover:-translate-y-0.5 hover:border-teal-300 hover:shadow-lg hover:shadow-slate-900/5'
       }`}
     >
       {isSelected && (

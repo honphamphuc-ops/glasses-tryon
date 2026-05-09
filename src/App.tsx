@@ -37,6 +37,7 @@ import { GlassesTransform, Point3D } from '@/types/landmarks';
 interface RenderFrameState {
   transform: GlassesTransform | null;
   landmarks: Point3D[] | null;
+  sourceSize: { width: number; height: number } | null;
 }
 
 const DEFAULT_ADJUSTMENT: Required<GlassesAdjustment> = {
@@ -55,14 +56,17 @@ function adjustmentFromModel(glasses: GlassesModel | null): Required<GlassesAdju
 
 export default function App() {
   // 1. Refs để quản lý dữ liệu không cần re-render
+  const viewportRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const latestFrameRef = useRef<RenderFrameState>({ transform: null, landmarks: null });
+  const debugCanvasRef = useRef<HTMLCanvasElement>(null);
+  const latestFrameRef = useRef<RenderFrameState>({ transform: null, landmarks: null, sourceSize: null });
 
   // 2. Local State
   const [isDebugMode, setIsDebugMode] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [debugAdjustment, setDebugAdjustment] = useState<Required<GlassesAdjustment>>(DEFAULT_ADJUSTMENT);
   const [debugStatus, setDebugStatus] = useState<string | null>(null);
+  const [canvasSize, setCanvasSize] = useState({ width: 1280, height: 720 });
   const [preloadProgress, setPreloadProgress] = useState({
     loaded: 0,
     total: glassesCatalog.length,
@@ -87,7 +91,7 @@ export default function App() {
   const { processSample, isCalibrated, progress } = useCalibration();
   
   // 5. Khởi tạo Renderer 3D
-  const { renderFrame, sceneRef, modelRef, maskRef } = useGlassesRenderer(canvasRef, 1280, 720);
+  const { renderFrame, sceneRef, modelRef, maskRef } = useGlassesRenderer(canvasRef, canvasSize.width, canvasSize.height);
 
   /**
    * 6. LUỒNG XỬ LÝ AI (Tracking - 30fps)
@@ -95,11 +99,16 @@ export default function App() {
    */
   const handleResults = useCallback((results: any) => {
     markTrackEnd(results.multiFaceLandmarks?.length > 0);
+    const debugContext = debugCanvasRef.current?.getContext('2d') ?? null;
+    const debugWidth = debugCanvasRef.current?.width ?? canvasSize.width;
+    const debugHeight = debugCanvasRef.current?.height ?? canvasSize.height;
+    const videoWidth = Math.max(videoRef.current?.videoWidth ?? canvasSize.width, 1);
+    const videoHeight = Math.max(videoRef.current?.videoHeight ?? canvasSize.height, 1);
 
     if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
       const rawPoints = results.multiFaceLandmarks[0];
       // Chuyển đổi landmark sang đơn vị Pixel
-      const landmarks = extractLandmarks(rawPoints, 1280, 720);
+      const landmarks = extractLandmarks(rawPoints, videoWidth, videoHeight);
 
       // Hiệu chỉnh khuôn mặt nếu cần
       if (!isCalibrated) {
@@ -110,30 +119,34 @@ export default function App() {
       const activeAdjustment = isTuningDebug && selectedGlasses
         ? { ...selectedGlasses, ...debugAdjustment }
         : selectedGlasses;
-      const transform = computeGlassesTransform(landmarks.points, calibratedEyeWidth, activeAdjustment);
-      latestFrameRef.current = { transform, landmarks: landmarks.points };
+      const transform = isCalibrated
+        ? computeGlassesTransform(landmarks.points, calibratedEyeWidth, activeAdjustment)
+        : null;
+      latestFrameRef.current = {
+        transform,
+        landmarks: landmarks.points,
+        sourceSize: { width: videoWidth, height: videoHeight },
+      };
 
       // VẼ DEBUG 2D (Chỉ chạy khi bật mode)
-      if (isDebugMode && canvasRef.current) {
-        const ctx = canvasRef.current.getContext('2d');
-        if (ctx) {
-          ctx.clearRect(0, 0, 1280, 720); // Xóa frame cũ
-          drawDebugLandmarks(ctx, rawPoints, 1280, 720);
-          
-          // Sử dụng eye metrics thay vì transform để tránh lỗi crash
-          const metrics = extractEyeMetrics(landmarks.points);
-          drawEyeBoundingBox(ctx, metrics, 1280, 720);
-          
-          drawNosePoint(ctx, rawPoints, 1280, 720);
-        }
+      if (isDebugMode && debugContext) {
+        debugContext.clearRect(0, 0, debugWidth, debugHeight);
+        drawDebugLandmarks(debugContext, rawPoints, debugWidth, debugHeight);
+
+        const metrics = extractEyeMetrics(rawPoints as Point3D[]);
+        drawEyeBoundingBox(debugContext, metrics, debugWidth, debugHeight);
+
+        drawNosePoint(debugContext, rawPoints, debugWidth, debugHeight);
       }
     } else {
-      latestFrameRef.current = { transform: null, landmarks: null };
-      if (isDebugMode && canvasRef.current) {
-        canvasRef.current.getContext('2d')?.clearRect(0, 0, 1280, 720);
+      latestFrameRef.current = { transform: null, landmarks: null, sourceSize: null };
+      if (isDebugMode) {
+        debugContext?.clearRect(0, 0, debugWidth, debugHeight);
       }
     }
   }, [
+    canvasSize.height,
+    canvasSize.width,
     calibratedEyeWidth,
     debugAdjustment,
     isCalibrated,
@@ -142,6 +155,7 @@ export default function App() {
     markTrackEnd,
     processSample,
     selectedGlasses,
+    videoRef,
   ]);
 
   /**
@@ -150,7 +164,11 @@ export default function App() {
    */
   const handleFrame = useCallback(() => {
     markFrame();
-    renderFrame(latestFrameRef.current.transform, latestFrameRef.current.landmarks);
+    renderFrame(
+      latestFrameRef.current.transform,
+      latestFrameRef.current.landmarks,
+      latestFrameRef.current.sourceSize
+    );
   }, [markFrame, renderFrame]);
 
   // 8. Kết nối vào vòng lặp Animation chính
@@ -170,7 +188,7 @@ export default function App() {
     setWebcamStatus('active');
   };
 
-  const handleSelectGlasses = async (glasses: GlassesModel) => {
+  const handleSelectGlasses = (glasses: GlassesModel) => {
     if (selectedGlasses?.id === glasses.id && loadingModelId !== glasses.id) {
       return;
     }
@@ -200,6 +218,57 @@ export default function App() {
   useEffect(() => {
     ensureCaptureHistoryStorage();
   }, []);
+
+  useEffect(() => {
+    const viewport = viewportRef.current;
+    if (!viewport) {
+      return;
+    }
+
+    const updateCanvasSize = () => {
+      const { width, height } = viewport.getBoundingClientRect();
+      const nextWidth = Math.max(1, Math.round(width));
+      const nextHeight = Math.max(1, Math.round(height));
+
+      setCanvasSize((current) => {
+        if (current.width === nextWidth && current.height === nextHeight) {
+          return current;
+        }
+
+        return { width: nextWidth, height: nextHeight };
+      });
+    };
+
+    updateCanvasSize();
+
+    if (typeof ResizeObserver !== 'undefined') {
+      const observer = new ResizeObserver(() => {
+        updateCanvasSize();
+      });
+      observer.observe(viewport);
+
+      return () => {
+        observer.disconnect();
+      };
+    }
+
+    window.addEventListener('resize', updateCanvasSize);
+
+    return () => {
+      window.removeEventListener('resize', updateCanvasSize);
+    };
+  }, []);
+
+  useEffect(() => {
+    sceneRef.current?.resize(canvasSize.width, canvasSize.height);
+  }, [canvasSize.height, canvasSize.width, sceneRef]);
+
+  useEffect(() => {
+    if (!isDebugMode) {
+      const canvas = debugCanvasRef.current;
+      canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+    }
+  }, [isDebugMode]);
 
   useEffect(() => {
     setDebugAdjustment(adjustmentFromModel(selectedGlasses));
@@ -295,8 +364,14 @@ export default function App() {
             <PermissionModal onAllow={handleStart} error={camError} />
           )}
 
-          <div className="relative aspect-video w-full max-w-5xl overflow-hidden rounded-xl shadow-2xl">
-            <WebcamView videoRef={videoRef} canvasRef={canvasRef} />
+          <div ref={viewportRef} className="relative aspect-video w-full max-w-5xl overflow-hidden rounded-xl shadow-2xl">
+            <WebcamView
+              videoRef={videoRef}
+              canvasRef={canvasRef}
+              debugCanvasRef={debugCanvasRef}
+              canvasWidth={canvasSize.width}
+              canvasHeight={canvasSize.height}
+            />
 
             {showModelOverlay && (
               <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-slate-950/20 backdrop-blur-[2px]">
@@ -343,6 +418,7 @@ export default function App() {
               glasses={glassesCatalog}
               selectedId={selectedGlasses?.id ?? null}
               loadingId={loadingModelId}
+              disabled={!isCalibrated}
               onSelect={handleSelectGlasses}
               onResetCalibration={resetCalibration}
               isCalibrated={isCalibrated}

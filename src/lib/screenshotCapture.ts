@@ -63,9 +63,14 @@ export async function captureSnapshot(
   ctx.drawImage(videoEl, 0, 0, width, height);
   ctx.restore();
 
-  // Lớp 2: Vẽ Three.js Canvas (Kính 3D)
+  // Lớp 2: Vẽ Three.js Canvas (Kính 3D) - cũng phải lật gương để khớp đúng với
+  // CSS scaleX(-1) đang áp dụng trên canvas hiển thị ngoài giao diện.
   // Lưu ý: outputCanvas phải được khởi tạo với preserveDrawingBuffer: true
+  ctx.save();
+  ctx.scale(-1, 1);
+  ctx.translate(-width, 0);
   ctx.drawImage(outputCanvas, 0, 0, width, height);
+  ctx.restore();
 
   // 2. Xuất dữ liệu ảnh
   const dataUrl = captureCanvas.toDataURL('image/png');

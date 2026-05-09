@@ -7,13 +7,43 @@ import { createOcclusionMask, updateOcclusionMask } from '@/lib/occlusionMask';
 import { applyTransformToModel } from '@/lib/poseEstimator';
 import { GlassesTransform, Point3D } from '@/types/landmarks';
 
+interface FrameSourceSize {
+  width: number;
+  height: number;
+}
+
+function scalePointToRenderSpace(
+  point: Point3D,
+  sourceSize: FrameSourceSize,
+  renderWidth: number,
+  renderHeight: number
+): Point3D {
+  return {
+    x: point.x * (renderWidth / sourceSize.width),
+    y: point.y * (renderHeight / sourceSize.height),
+    z: point.z,
+  };
+}
+
+function scaleTransformToRenderSpace(
+  transform: GlassesTransform,
+  sourceSize: FrameSourceSize,
+  renderWidth: number,
+  renderHeight: number
+): GlassesTransform {
+  return {
+    ...transform,
+    position: scalePointToRenderSpace(transform.position, sourceSize, renderWidth, renderHeight),
+  };
+}
+
 export function useGlassesRenderer(
   outputCanvasRef: React.RefObject<HTMLCanvasElement>,
   width: number,
   height: number
 ) {
   // Lấy state từ Zustand store
-  const { selectedGlasses, calibratedEyeWidth, startLoadModel, finishLoadModel } = useAppStore();
+  const { selectedGlasses, startLoadModel, finishLoadModel } = useAppStore();
   
   // Refs lưu trữ các đối tượng 3D để tránh re-render không cần thiết
   const sceneRef = useRef<ThreeScene | null>(null);
@@ -60,7 +90,15 @@ export function useGlassesRenderer(
       sceneRef.current = null;
       threeScene.dispose();
     };
-  }, [outputCanvasRef, width, height, removeCurrentModel]);
+  }, [outputCanvasRef, removeCurrentModel]);
+
+  useEffect(() => {
+    if (!sceneRef.current) {
+      return;
+    }
+
+    sceneRef.current.resize(width, height);
+  }, [height, width]);
 
   // 2. TẢI VÀ CHUYỂN ĐỔI KÍNH (Chạy mỗi khi user chọn kính mới)
   // ★ [XỬ LÝ CALIBRATION KHI ĐỔI KÍNH MỚI]
@@ -124,26 +162,39 @@ export function useGlassesRenderer(
   }, [selectedGlasses, startLoadModel, finishLoadModel, removeCurrentModel]);
 
   // 3. VÒNG LẶP RENDER (Được gọi 60 lần/giây từ useAnimationLoop)
-  const renderFrame = useCallback((transform: GlassesTransform | null, landmarks: Point3D[] | null) => {
+  const renderFrame = useCallback((
+    transform: GlassesTransform | null,
+    landmarks: Point3D[] | null,
+    sourceSize: FrameSourceSize | null = null
+  ) => {
     const sceneObj = sceneRef.current;
     const model = modelRef.current;
     const mask = maskRef.current;
+    const renderCanvas = outputCanvasRef.current;
 
-    if (!sceneObj || !outputCanvasRef.current) return;
+    if (!sceneObj || !renderCanvas) return;
+
+    const renderWidth = renderCanvas.width || width;
+    const renderHeight = renderCanvas.height || height;
+    const mappedTransform = transform && sourceSize
+      ? scaleTransformToRenderSpace(transform, sourceSize, renderWidth, renderHeight)
+      : transform;
+    const mappedLandmarks = landmarks && sourceSize
+      ? landmarks.map((point) => scalePointToRenderSpace(point, sourceSize, renderWidth, renderHeight))
+      : landmarks;
 
     // Nếu MediaPipe tìm thấy mặt và đã tính toán xong tọa độ
-    if (transform && landmarks && model && mask) {
+    if (mappedTransform && mappedLandmarks && model && mask) {
       model.visible = true;
-      updateOcclusionMask(mask, landmarks, sceneObj.camera, outputCanvasRef.current);
+      updateOcclusionMask(mask, mappedLandmarks, sceneObj.camera, renderCanvas);
 
       // Bước A: Áp dụng vị trí, góc quay, tỉ lệ cho Kính
       applyTransformToModel(
         model,
-        transform,
+        mappedTransform,
         sceneObj.camera,
-        outputCanvasRef.current.width,
-        outputCanvasRef.current.height,
-        calibratedEyeWidth
+        renderCanvas.width,
+        renderCanvas.height
       );
 
     } else if (model && mask) {
@@ -154,7 +205,7 @@ export function useGlassesRenderer(
 
     // Tiến hành vẽ (Render) khung hình 3D lên Canvas
     sceneObj.renderer.render(sceneObj.scene, sceneObj.camera);
-  }, [calibratedEyeWidth, outputCanvasRef]);
+  }, [height, outputCanvasRef, width]);
 
   return { renderFrame, sceneRef, modelRef, maskRef };
 }

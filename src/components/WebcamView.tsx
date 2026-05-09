@@ -3,10 +3,20 @@ import React, { useState } from 'react';
 interface WebcamViewProps {
   videoRef: React.RefObject<HTMLVideoElement>;
   canvasRef: React.RefObject<HTMLCanvasElement>;
+  debugCanvasRef: React.RefObject<HTMLCanvasElement>;
+  canvasWidth: number;
+  canvasHeight: number;
   onToggleDebug?: (isDebug: boolean) => void; // Thêm prop để báo cho App.tsx biết
 }
 
-export function WebcamView({ videoRef, canvasRef, onToggleDebug }: WebcamViewProps) {
+export function WebcamView({
+  videoRef,
+  canvasRef,
+  debugCanvasRef,
+  canvasWidth,
+  canvasHeight,
+  onToggleDebug,
+}: WebcamViewProps) {
   const [isDebugMode, setIsDebugMode] = useState(false);
 
   const handleToggle = () => {
@@ -45,6 +55,15 @@ export function WebcamView({ videoRef, canvasRef, onToggleDebug }: WebcamViewPro
       />
       <canvas
         ref={canvasRef}
+        width={canvasWidth}
+        height={canvasHeight}
+        className="pointer-events-none absolute inset-0 h-full w-full"
+        style={{ transform: 'scaleX(-1)' }}
+      />
+      <canvas
+        ref={debugCanvasRef}
+        width={canvasWidth}
+        height={canvasHeight}
         className="pointer-events-none absolute inset-0 h-full w-full"
         style={{ transform: 'scaleX(-1)' }}
       />
