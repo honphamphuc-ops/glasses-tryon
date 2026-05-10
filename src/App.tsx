@@ -80,6 +80,7 @@ export default function App() {
     loadingModelId,
     setIsLoading, 
     calibratedEyeWidth,
+    calibratedFaceWidth,
     resetCalibration,
     setWebcamStatus
   } = useAppStore();
@@ -120,7 +121,7 @@ export default function App() {
         ? { ...selectedGlasses, ...debugAdjustment }
         : selectedGlasses;
       const transform = isCalibrated
-        ? computeGlassesTransform(landmarks.points, calibratedEyeWidth, activeAdjustment)
+        ? computeGlassesTransform(landmarks.points, calibratedEyeWidth, calibratedFaceWidth,activeAdjustment)
         : null;
       latestFrameRef.current = {
         transform,

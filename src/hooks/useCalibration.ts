@@ -5,34 +5,51 @@ import { KEY_POINTS } from '@/data/landmarkIndices';
 
 export function useCalibration() {
   const { calibratedEyeWidth, calibrate } = useAppStore();
-  const samplesRef = useRef<number[]>([]);
+  const eyeSamplesRef = useRef<number[]>([]);
+  const faceSamplesRef = useRef<number[]>([]);
   const [progress, setProgress] = useState<number>(0);
 
   const isCalibrated = calibratedEyeWidth !== null;
 
   const processSample = useCallback(
     (landmarks: Point3D[]) => {
-      // Nếu đã calibrate rồi thì bỏ qua
       if (isCalibrated) return;
 
       const leftOuter = landmarks[KEY_POINTS.LEFT_EYE_OUTER];
       const rightOuter = landmarks[KEY_POINTS.RIGHT_EYE_OUTER];
+      const leftTemple = landmarks[KEY_POINTS.LEFT_EAR];
+      const rightTemple = landmarks[KEY_POINTS.RIGHT_EAR];
 
-      if (!leftOuter || !rightOuter) return;
+      if (!leftOuter || !rightOuter || !leftTemple || !rightTemple) return;
 
-      // Đo khoảng cách mắt hiện tại
-      const eyeWidth = Math.hypot(rightOuter.x - leftOuter.x, rightOuter.y - leftOuter.y);
-      samplesRef.current.push(eyeWidth);
+      // Đo eye width
+      const eyeWidth = Math.hypot(
+        rightOuter.x - leftOuter.x,
+        rightOuter.y - leftOuter.y
+      );
+      // Đo face width
+      const faceWidth = Math.hypot(
+        rightTemple.x - leftTemple.x,
+        rightTemple.y - leftTemple.y
+      );
 
-      // Cập nhật progress (0 - 100%)
-      const currentProgress = Math.min((samplesRef.current.length / 10) * 100, 100);
+      eyeSamplesRef.current.push(eyeWidth);
+      faceSamplesRef.current.push(faceWidth);
+
+      const currentProgress = Math.min(
+        (eyeSamplesRef.current.length / 10) * 100,
+        100
+      );
       setProgress(currentProgress);
 
-      // Khi đủ 10 mẫu, tính trung bình và lưu vào store
-      if (samplesRef.current.length >= 10) {
-        const sum = samplesRef.current.reduce((acc, val) => acc + val, 0);
-        const avg = sum / samplesRef.current.length;
-        calibrate(avg);
+      // Khi đủ 10 mẫu, tính trung bình và calibrate
+      if (eyeSamplesRef.current.length >= 10) {
+        const sumEye = eyeSamplesRef.current.reduce((a, b) => a + b, 0);
+        const avgEye = sumEye / eyeSamplesRef.current.length;
+        const sumFace = faceSamplesRef.current.reduce((a, b) => a + b, 0);
+        const avgFace = sumFace / faceSamplesRef.current.length;
+
+        calibrate(avgEye, avgFace);  // Gọi action mới
       }
     },
     [isCalibrated, calibrate]
